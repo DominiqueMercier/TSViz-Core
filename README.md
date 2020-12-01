@@ -94,9 +94,7 @@ while True:
 
 ### Tested with
 
-- TensorFlow 1.12.0
-- Keras Surgeon 0.0.1
-- Keras 2.1.2
+Versions listed in src/requirements.txt
 
 ### Exposed methods
 
