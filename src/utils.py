@@ -17,8 +17,8 @@ if USE_SEABORN:
     sns.set()  # Set the seaborn defaults
 
 # Pruning libraries
-import keras
-import kerassurgeon as ks
+from tensorflow.keras.models import clone_model
+import tfkerassurgeon as ks
 
 # Clustering libraries
 # from kMeansDTW import KMeansDTW, dtw_distances
@@ -44,20 +44,23 @@ from config import *
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
 
 
-class Modes(Enum):
+class Selection_Modes(Enum):
     # Importance selection modes
     LOSS = 0
     IMPORTANCE = 1
 
+class Prune_Modes(Enum):
     # Modes - prune()
     PRUNE = 0
     ADJUST = 1
 
+class Filter_Modes(Enum):
     # Modes - get_filter_list_from_file()
     COMPUTE_RANDOM = 0
     COMPUTE_PERCENTILE = 1
     COMPUTE_REPRESENTATIVE = 2
 
+class Importance_Modes(Enum):
     # Importance modes - get_filter_list()
     PERCENTILE_MAXIMUM = 0
     PERCENTILE_MINIMUM = 1
@@ -65,15 +68,18 @@ class Modes(Enum):
     SORTED_IMPORTANCE_MINIMUM = 3
     CLUSTER_REPRESENTATIVES = 4
 
+class Importance_Submodes(Enum):
     # Sub-modes - get_filter_list_from_file()
     MINIMUM = 0
     MAXIMUM = 1
     MEAN = 2
 
+class Data_Modes(Enum):
     # Data modes
     SELECTED_EXAMPLES = 0
     ALL_EXAMPLES = 1
 
+class Computation_Modes(Enum):
     # Fast modes
     FULL = 0
     PARTIAL = 1
@@ -243,7 +249,8 @@ def pruneNetwork(session, kerasModel, filterToRemove):
     with session.graph.as_default():
         surgeon = ks.Surgeon(kerasModel, copy=True)
         for layerIdx, layer in enumerate(kerasModel.layers):
-            if not ("flatten" in layer.name or "pool" in layer.name or "input" in layer.name or "dense" in layer.name):
+            if 'conv' in layer.name:
+            #if not ("flatten" in layer.name or "pool" in layer.name or "input" in layer.name or "dense" in layer.name):
                 # Remove the filters described in the list
                 if (currentLayer < len(filterToRemove)) and (len(filterToRemove[currentLayer]) > 0):
                     print("Removing filters from layer: %s" % layer.name)
@@ -252,17 +259,17 @@ def pruneNetwork(session, kerasModel, filterToRemove):
 
         new_model = surgeon.operate()
         new_model.compile(loss=kerasModel.loss, metrics=kerasModel.metrics, optimizer=kerasModel.optimizer)
-
     return new_model
 
 
 def adjustWeights(session, kerasModel, filterToAdjust):
     currentLayer = 0
     with session.graph.as_default():
-        new_model = keras.models.clone_model(kerasModel)
+        new_model = clone_model(kerasModel)
         new_model.set_weights(kerasModel.get_weights())
         for layer in new_model.layers:
-            if not ("flatten" in layer.name or "pool" in layer.name or "input" in layer.name or "dense" in layer.name):
+            if 'conv' in layer.name:
+            #if not ("flatten" in layer.name or "pool" in layer.name or "input" in layer.name or "dense" in layer.name):
                 # Obtain layer weights
                 weights = layer.get_weights()
                 if (currentLayer < len(filterToAdjust)) and (len(filterToAdjust[currentLayer]) > 0):
@@ -324,21 +331,21 @@ def computeIndices(importanceValues, importanceMode, numberOfFilter, layerSelect
         if not layerIdx in layerSelection:
             continue
 
-        if importanceMode == Modes.PERCENTILE_MINIMUM.value or importanceMode == Modes.PERCENTILE_MAXIMUM.value:
+        if importanceMode == Importance_Modes.PERCENTILE_MINIMUM.value or importanceMode == Importance_Modes.PERCENTILE_MAXIMUM.value:
             # Percentile
             perc = np.percentile(importanceValues[layerIdx], numberOfFilter)
             for filterIdx, filterIm in enumerate(importanceValues[layerIdx]):
-                if importanceMode == Modes.PERCENTILE_MAXIMUM.value and filterIm > perc:
+                if importanceMode == Importance_Modes.PERCENTILE_MAXIMUM.value and filterIm > perc:
                     result[layerIdx].append(filterIdx)
-                if importanceMode == Modes.PERCENTILE_MINIMUM.value and filterIm < perc:
+                if importanceMode == Importance_Modes.PERCENTILE_MINIMUM.value and filterIm < perc:
                     result[layerIdx].append(filterIdx)
 
-        if importanceMode == Modes.SORTED_IMPORTANCE_MINIMUM.value or importanceMode == Modes.SORTED_IMPORTANCE_MAXIMUM.value:
+        if importanceMode == Importance_Modes.SORTED_IMPORTANCE_MINIMUM.value or importanceMode == Importance_Modes.SORTED_IMPORTANCE_MAXIMUM.value:
             # Sorted by importance with fixed value
             sortedIdxs = np.argsort(importanceValues[layerIdx])
-            if importanceMode == Modes.SORTED_IMPORTANCE_MAXIMUM.value:
+            if importanceMode == Importance_Modes.SORTED_IMPORTANCE_MAXIMUM.value:
                 result[layerIdx] = sortedIdxs[-numberOfFilter:]
-            if importanceMode == Modes.SORTED_IMPORTANCE_MINIMUM.value:
+            if importanceMode == Importance_Modes.SORTED_IMPORTANCE_MINIMUM.value:
                 result[layerIdx] = sortedIdxs[:numberOfFilter]
 
     return result
@@ -403,7 +410,8 @@ def randomUseless(visualizationToolbox, percentile):
     '''
     layerList = []
     layers = visualizationToolbox.model.layers
-    layers = [layer for layer in layers if not (("flatten" in layer.name) or ("pool" in layer.name) or ("input" in layer.name) or ("dense" in layer.name))]
+    layers = [layer for layer in layers if not "conv" in layer.name]
+    #layers = [layer for layer in layers if not (("flatten" in layer.name) or ("pool" in layer.name) or ("input" in layer.name) or ("dense" in layer.name))]
     for l in range(len(layers)):
         numFilters = layers[l].output_shape[2]
         prunedNumber = int(numFilters*percentile/100)
@@ -417,9 +425,9 @@ def computeRemovementSets(visualizationToolbox, path, p):
     Get important filters
     '''
     importanceStats = np.load(path)
-    allSortedMin = sortFiltersArg(visualizationToolbox, importanceStats, Modes.MINIMUM.value)
-    allSortedMax = sortFiltersArg(visualizationToolbox, importanceStats, Modes.MAXIMUM.value)
-    allSortedMean = sortFiltersArg(visualizationToolbox, importanceStats, Modes.MEAN.value)
+    allSortedMin = sortFiltersArg(visualizationToolbox, importanceStats, Importance_Submodes.MINIMUM.value)
+    allSortedMax = sortFiltersArg(visualizationToolbox, importanceStats, Importance_Submodes.MAXIMUM.value)
+    allSortedMean = sortFiltersArg(visualizationToolbox, importanceStats, Importance_Submodes.MEAN.value)
 
     removedPercentileMin = removePercentile(allSortedMin, p)
     removedPercentileMax = removePercentile(allSortedMax, p)
@@ -435,7 +443,8 @@ def sortFiltersArg(visualizationToolbox, importanceStats, mode):
     importance = []
     for l in range(importanceStats.shape[0]):
         layerName = visualizationToolbox.layerNames[l]
-        if not (("flatten" in layerName) or ("dense" in layerName) or ("input" in layerName) or ("pool" in layerName)):
+        if 'conv' in layerName:
+        #if not (("flatten" in layerName) or ("dense" in layerName) or ("input" in layerName) or ("pool" in layerName)):
             listModded = [x[mode] for x in importanceStats[l]]
             index.append(np.argsort(listModded))
             importance.append(np.sort(listModded))
@@ -467,7 +476,7 @@ def computeMostTimesRepresentives(visualizationToolbox, path, dataset):
     '''
     Get representative filters
     '''
-    serviceOutput = visualizationToolbox.loadData(dataset=dataset, fastMode=Modes.PARTIAL.value)
+    serviceOutput = visualizationToolbox.loadData(dataset=dataset, fastMode=Computation_Modes.PARTIAL.value)
     representivesStats = np.load(path)
     occuranceList = np.zeros(len(serviceOutput[visualizationToolbox.layerNamesIdx]), dtype=object)
     finalRepresentives = np.zeros(len(serviceOutput[visualizationToolbox.layerNamesIdx]), dtype=object)
@@ -512,11 +521,12 @@ def computeRepresentives(visualizationToolbox, serviceOutput, valueIdx):
 
 
 def keepOnlyRepresentants(visualizationToolbox, representants, dataset):
-    serviceOutput = visualizationToolbox.loadData(dataset=dataset, fastMode=Modes.PARTIAL.value)
+    serviceOutput = visualizationToolbox.loadData(dataset=dataset, fastMode=Computation_Modes.PARTIAL.value)
     result = []
     for l in range(len(representants)):
         layerName = serviceOutput[visualizationToolbox.layerNamesIdx][l]
-        if not (("flatten" in layerName) or ("pool" in layerName) or ("input" in layerName)):
+        if 'conv' in layerName:
+        #if not (("flatten" in layerName) or ("pool" in layerName) or ("input" in layerName)):
             allFilters = np.arange(len(serviceOutput[visualizationToolbox.dataStartingIdx+0]))
             useless = np.setdiff1d(allFilters, representants[l])
             result.append(useless.tolist())
@@ -542,7 +552,7 @@ def representativeStatisticsToSpecificFile(visualizationToolbox, representivesSt
 
 
 def reverseFilterList(visualizationToolbox, filterObject):
-    serviceOutput = visualizationToolbox.loadData(dataset=Dataset.TRAIN.value, fastMode=Modes.MINIMAL.value)
+    serviceOutput = visualizationToolbox.loadData(dataset=Dataset.TRAIN.value, fastMode=Computation_Modes.MINIMAL.value)
     convIds = [i + visualizationToolbox.dataStartingIdx for i in range(len(serviceOutput[visualizationToolbox.layerNamesIdx])) if "conv" in serviceOutput[visualizationToolbox.layerNamesIdx][i]]
     result = []
     for idx, fList in enumerate(filterObject):
@@ -734,7 +744,8 @@ def computeAllImportanceValuesRandom(visualizationToolbox, examples, valueIdx, d
 
     # Get correct shapes
     layers = visualizationToolbox.model.layers
-    layers = [layer for layer in layers if not ("flatten" in layer.name or "input" in layer.name or "dense" in layer.name)]
+    layers = [layer for layer in layers if 'conv' in layer.name]
+    #layers = [layer for layer in layers if not ("flatten" in layer.name or "input" in layer.name or "dense" in layer.name)]
     resultList = np.zeros(len(layers), dtype=object)
 
     for l in range(len(layers)):
@@ -746,7 +757,7 @@ def computeAllImportanceValuesRandom(visualizationToolbox, examples, valueIdx, d
     for i, j in enumerate(tqdm(trainingExamples)):
         # print("Computing influence of example:", j)
         visualizationToolbox.inputIterator = j
-        serviceOutput = visualizationToolbox.loadData(dataset=dataset, fastMode=Modes.MINIMAL.value)
+        serviceOutput = visualizationToolbox.loadData(dataset=dataset, fastMode=Computation_Modes.MINIMAL.value)
         for l in range(visualizationToolbox.dataStartingIdx, len(serviceOutput)-1):
             for f in range(len(serviceOutput[l])):
                 resultList[l-visualizationToolbox.dataStartingIdx][f][i] = serviceOutput[l][f][valueIdx]
@@ -796,8 +807,8 @@ def importanceStatisticsToSpecificFile(visualizationToolbox, importanceStats, fi
                 textFile.write(s)
 
 
-def getAdjustedFilterIndices(name):
-    filepath = os.path.join(".", os.path.join("adjustedFilters", name))
+def getAdjustedFilterIndices(name, dataname):
+    filepath = os.path.join(".", os.path.join("adjustedFilters", name + "_" + dataname))
     try:
         with open(filepath, 'r') as file:
             indiceString = file.read()
@@ -843,7 +854,7 @@ def computeAllRepresentativesRandom(visualizationToolbox, examples, valueIdx, da
     for i, j in enumerate(tqdm(trainingExamples)):
         # print("Compute Example: " + str(i))
         visualizationToolbox.inputIterator = j
-        serviceOutput = visualizationToolbox.loadData(dataset=dataset, fastMode=Modes.PARTIAL.value)
+        serviceOutput = visualizationToolbox.loadData(dataset=dataset, fastMode=Computation_Modes.PARTIAL.value)
         allRepresentives[i] = computeRepresentives(visualizationToolbox, serviceOutput, valueIdx)
 
     visualizationToolbox.inputIterator = inputIteratorBefore
@@ -1143,7 +1154,7 @@ def computeFilterClusters(visualizationToolbox, serviceOutput, visualizeFilters=
                     outputPath = os.path.join(layerOutputDir, "dendrogram.png")
                     plt.savefig(outputPath, dpi=300)
 
-                if SELECTION_TYPE == Clustering.ASANKA:  # Asanka
+                if SELECTION_TYPE == Selection.ASANKA:  # Asanka
                     wcss, cut = compute_wcss(z, rawFilterValues)  # Invert the list so that it starts from 1 to n
                     wcss = wcss[::-1]
 
@@ -1151,7 +1162,7 @@ def computeFilterClusters(visualizationToolbox, serviceOutput, visualizeFilters=
                     numClusters = asankaFindK(wcss, numFilters, layerOutputDir, visualizeFilters, verbose=verbose)
                     numClusters = cut.shape[1] - numClusters
 
-                elif SELECTION_TYPE == Clustering.SILHOUETTE:  # Silhouette
+                elif SELECTION_TYPE == Selection.SILHOUETTE:  # Silhouette
                     cut = np.array(cut_tree(z))
                     numClusters = silhouetteFindK(cut, dists, layerOutputDir, visualizeFilters, verbose=verbose)
 

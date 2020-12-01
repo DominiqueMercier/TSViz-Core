@@ -18,12 +18,12 @@ except ImportError:
 # Initialize the model
 print("Initializing the model")
 visualizationToolbox = VisualizationToolbox()
-visualizationToolbox.initializeTensorflow()
+#visualizationToolbox.initializeTensorflow()
 
 # Spawn the service
 print("Initializing the service")
 app = Flask(__name__)
-# cors = CORS(app)
+cors = CORS(app)
 
 
 @app.route('/viz/api/train', methods=['GET'])
@@ -125,6 +125,20 @@ def classify():
     return jsonify({'status': 'ok', 'prediction': str(visualizationToolbox.classifySequence(seq))})
 
 
+@app.route("/viz/api/fetch_custom", methods=['GET'])
+def fetch_custom():
+    dataShape = visualizationToolbox.trainX.shape[1:]
+    seq = ";".join([",".join(['0' for i in range(dataShape[0])]) for j in range(dataShape[1])])
+    
+    if 'seq' in request.args:
+        seq = request.args.get('seq', seq)
+        label = request.args.get('label', 0)
+
+    seq = seq.split(";")
+    seq = np.array([list(eval(x)) for x in seq]).T
+    return jsonify({'data': visualizationToolbox.loadData(customSeq=seq, customLabel=label)})
+
+
 @app.route('/viz/api/cluster', methods=['GET'])
 def performClustering():
     visualizationToolbox.performFilterClustering()
@@ -143,7 +157,11 @@ def performPruning():
         epochs = int(request.args.get('epochs', 1))
         indices = indiceStringToList(request.args.get('indices', "0;;"))
         name = request.args.get('name', "my_model")
-        mode = request.args.get('mode', Modes.PRUNE.value)
+        mode = request.args.get('mode', Prune_Modes.PRUNE.value)
+        if mode == "0" or mode == "prune":
+            mode = 0
+        else:
+            mode = 1
         '''
         # if name = "", create timestamp
         if name == "":
@@ -161,7 +179,7 @@ def performPruning():
 def loadPrunedModel():
     if "name" in request.args:
         name = request.args.get("name", "my_model")
-        path = os.path.join(".", os.path.join("prunedModels", name))
+        path = os.path.join(".", os.path.join("prunedModels_" + visualizationToolbox.dataName, name))
         visualizationToolbox.modelPath = path + ".h5"
         visualizationToolbox.currentlyLoadedModel = name
         visualizationToolbox.loadModel()
@@ -184,7 +202,7 @@ def testCurrentModel():
 def getUsedModelNames():
     names = []
     try:
-        file = open(os.path.join('.', os.path.join('prunedModels', 'prunedModelNames')))
+        file = open(os.path.join('.', os.path.join('prunedModels', 'prunedModelNames_' + visualizationToolbox.dataName)))
         for name in file:
             name = name.replace(os.linesep, '')
             if name == '':
@@ -204,7 +222,7 @@ def deletePrunedModel():
         name = request.args.get("name", "my_model")
         dirpath = os.path.dirname(os.path.realpath(__file__))
         dirpath = os.path.join(dirpath, "prunedModels")
-        filepath = os.path.join(dirpath, "prunedModelNames")
+        filepath = os.path.join(dirpath, "prunedModelNames_" + visualizationToolbox.dataName)
 
         # erase the model name from file that saves the model names that are in use.
         linesToKeep = []
@@ -221,15 +239,15 @@ def deletePrunedModel():
             file.writelines(linesToKeep)
 
         # Delete min, max, mean importance statistics file
-        importanceFilepath = os.path.join(".", os.path.join("ImportanceStatistics", name))
+        importanceFilepath = os.path.join(".", os.path.join("ImportanceStatistics", name + "_" + visualizationToolbox.dataName))
         maybeDelete(importanceFilepath)
 
         # Delete the actual file the model is saved in (not actually necessary)
-        modelFilepath = os.path.join(".", os.path.join("prunedModels", name + ".h5"))
+        modelFilepath = os.path.join(".", os.path.join("prunedModels", name + "_" + visualizationToolbox.dataName + ".h5"))
         maybeDelete(modelFilepath)
 
         # Delete adjusted filter information file of the model (not actually necessary)
-        adjustedFilepath = os.path.join(".", os.path.join("adjustedFilters", name))
+        adjustedFilepath = os.path.join(".", os.path.join("adjustedFilters", name + "_" + visualizationToolbox.dataName))
         maybeDelete(adjustedFilepath)
 
         return jsonify({'status': 'ok'})
@@ -259,7 +277,7 @@ def checkNameAvailable():
     if 'name' in request.args:
         dirpath = os.path.dirname(os.path.realpath(__file__))
         dirpath = os.path.join(dirpath, "prunedModels")
-        filepath = os.path.join(dirpath, "prunedModelNames")
+        filepath = os.path.join(dirpath, "prunedModelNames_" + visualizationToolbox.dataName)
         name = request.args.get("name", "my_model")
 
         # Go through file that stores the already used names. And checks if name is in there or not.
@@ -289,7 +307,7 @@ def getAlternativeToName():
     if 'name' in request.args:
         dirpath = os.path.dirname(os.path.realpath(__file__))
         dirpath = os.path.join(dirpath, "prunedModels")
-        filepath = os.path.join(dirpath, "prunedModelNames")
+        filepath = os.path.join(dirpath, "prunedModelNames_" + visualizationToolbox.dataName)
         alternative = request.args.get("name", "my_model")
         i = 0
         try:
@@ -307,14 +325,14 @@ def getAlternativeToName():
 @app.route("/viz/api/get_filter_list", methods=['GET'])
 def getFilterList():
     #if datamode==1 ? compute for all examples : compute for selected
-    dataMode = int(request.args.get("data_mode", Modes.SELECTED_EXAMPLES.value))
+    dataMode = int(request.args.get("data_mode", Data_Modes.SELECTED_EXAMPLES.value))
 
     # if importance_mode==0 ? percentile maximum
     # if importance_mode==1 ? percentile minimum
     # if importance_mode==2 ? sorted importance maximum
     # if importance_mode==3 ? sorted importance miminum
     # if importance_mode==4 ? cluster representatives
-    importanceMode = int(request.args.get("importance_mode", Modes.PERCENTILE_MAXIMUM.value))
+    importanceMode = int(request.args.get("importance_mode", Importance_Modes.PERCENTILE_MAXIMUM.value))
 
     # if importance_mode==(0 or 1) ? percentile value
     # if importance_mode==(2 or 3) ? number of top most results
@@ -326,10 +344,10 @@ def getFilterList():
     layerSelection = np.fromstring(request.args.get("layer_selection", "0"), dtype=int, sep=",")
 
     # if importanceSelection==0 ? importance : loss
-    importanceSelection = int(request.args.get("importanceSelection", Modes.IMPORTANCE.value))
+    importanceSelection = int(request.args.get("importanceSelection", SelectionModes.IMPORTANCE.value))
 
     # if dataset==1 ? testset : trainset
-    dataset = int(request.args.get("dataset", Dataset.TRAIN.value))
+    dataset = int(request.args.get("dataset", Dataset_Splits.TRAIN.value))
 
     result = visualizationToolbox.computePruningFilterSet(dataMode, importanceMode, numberOfFilter, layerSelection, importanceSelection, dataset)
     result = listToIndiceString(result)
@@ -342,7 +360,8 @@ def loadCustomDataset():
         dataPath = request.args.get("dataPath", "./datamark-internettrafficdata.csv")
         if os.path.exists(dataPath):
             if os.path.isfile(dataPath):
-                datasetStats = visualizationToolbox.loadCustomSingleChannelDatasets(dataPath)
+                dataName = request.args.get("dataName", "Custom")
+                datasetStats = visualizationToolbox.loadCustomSingleChannelDatasets(dataPath, dataName)
                 return jsonify({'status': 'ok', 'stats': datasetStats})
         return jsonify({'status': 'No valid dataset path provided'})
     return jsonify({'status': 'No dataset provided'})
@@ -353,12 +372,12 @@ def getFilterListFromFile():
     # if mode==0 ? compute random
     # if mode==1 ? compute percentile
     # if mode==2 ? compute representative
-    mode = int(request.args.get("mode", Modes.COMPUTE_RANDOM.value))
+    mode = int(request.args.get("mode", Filter_Modes.COMPUTE_RANDOM.value))
 
     # if submode==0 ? min
     # if submode==1 ? max
     # if submode==2 ? mean
-    submode = int(request.args.get("submode", Modes.MEAN.value))
+    submode = int(request.args.get("submode", Importance_Modes.MEAN.value))
 
     # if mode==(0 or 1) ? percentile
     percentile = int(request.args.get("percentile", 10))
@@ -370,10 +389,10 @@ def getFilterListFromFile():
     examples = int(request.args.get("examples", 100))
 
     # if importanceSelection==0 ? importance : loss
-    importanceSelection = int(request.args.get("importanceSelection", Modes.IMPORTANCE.value))
+    importanceSelection = int(request.args.get("importanceSelection", Selection_Modes.IMPORTANCE.value))
 
     # if dataset==1 ? testset : trainset
-    dataset = int(request.args.get("dataset", Dataset.TRAIN.value))
+    dataset = int(request.args.get("dataset", Dataset_Splits.TRAIN.value))
 
     result = visualizationToolbox.computePruningFilterSetFromFile(mode, submode, percentile, reverse, examples, importanceSelection, dataset)
     result = listToIndiceString(result)
@@ -383,15 +402,15 @@ def getFilterListFromFile():
 # This method computes all pruning results reported in the paper
 @app.route("/viz/api/compute_all_pruning_results", methods=['GET'])
 def getPruningResults():
-    dataset = Dataset.TRAIN.value
+    dataset = Dataset_Splits.TRAIN.value
     examples = -1  # Complete dataset
     reverse = 0
-    mode = Modes.COMPUTE_PERCENTILE.value
+    mode = Filter_Modes.COMPUTE_PERCENTILE.value
     percentile = 10  # Doesn't matter
-    submode = Modes.MEAN.value
+    submode = Importance_Submodes.MEAN.value
     epochs = 10
-    pruningMode = Modes.PRUNE.value
-    adjustMode = Modes.ADJUST.value
+    pruningMode = Prune_Modes.PRUNE.value
+    adjustMode = Prune_Modes.ADJUST.value
     visualizationToolbox.setIterator(0)  # Set the iterator to the first example
 
     lossModeDisabled = True
@@ -420,11 +439,11 @@ def getPruningResults():
         # Importance values | 0: Loss, 1: Importance
         if (importanceType == 0) and lossModeDisabled:
             print("Computing statistics based on loss")
-            importance = Modes.LOSS.value
+            importance = Selection_Modes.LOSS.value
             continue
         else:
             print("Computing statistics based on importance")
-            importance = Modes.IMPORTANCE.value
+            importance = Selection_Modes.IMPORTANCE.value
             measure = "importance"
 
         completeResults.append([])
@@ -435,10 +454,9 @@ def getPruningResults():
         # Load the default model
         if visualizationToolbox.currentlyLoadedModel != visualizationToolbox.standardModelPath:
             print("Loading default model again!")
-            with K.get_session().graph.as_default():
-                visualizationToolbox.modelPath = visualizationToolbox.standardModelPath
-                visualizationToolbox.currentlyLoadedModel = visualizationToolbox.standardModelName
-                visualizationToolbox.loadModel()
+            visualizationToolbox.modelPath = visualizationToolbox.standardModelPath
+            visualizationToolbox.currentlyLoadedModel = visualizationToolbox.standardModelName
+            visualizationToolbox.loadModel()
 
         if not os.path.exists(filePath):
             result = visualizationToolbox.computePruningFilterSetFromFile(mode, submode, percentile, reverse, examples, importance, dataset)
@@ -453,12 +471,12 @@ def getPruningResults():
             layerName = visualizationToolbox.getModelLayerNames()[layerIdx]
             print("Computing statistics for layer:", layerName)
 
-            fileNamePartial = layerName + ("_loss" if importance == Modes.LOSS.value else "_importance")
+            fileNamePartial = layerName + ("_loss" if importance == Selection_Modes.LOSS.value else "_importance")
             pickleFileName = os.path.join(dirPath, fileNamePartial + ".pickle")
 
-            filterMinImp = [x[Modes.MINIMUM.value] for x in selectedLayer]
-            filterMaxImp = [x[Modes.MAXIMUM.value] for x in selectedLayer]
-            filterMeanImp = [x[Modes.MEAN.value] for x in selectedLayer]
+            filterMinImp = [x[Importance_Submodes.MINIMUM.value] for x in selectedLayer]
+            filterMaxImp = [x[Importance_Submodes.MAXIMUM.value] for x in selectedLayer]
+            filterMeanImp = [x[Importance_Submodes.MEAN.value] for x in selectedLayer]
 
             assert len(filterMinImp) > 1
             assert len(filterMaxImp) > 1
@@ -489,7 +507,7 @@ def getPruningResults():
             plt.close('all')
 
             # Create the plot for percentile based pruning
-            subMode = Modes.MEAN.value  # Performing pruning based on mean importance
+            subMode = Importance_Submodes.MEAN.value  # Performing pruning based on mean importance
             filterRanks = np.argsort(filterMeanImp)  # In ascending order by default going from least to max importance
             results = []
 
@@ -515,7 +533,7 @@ def getPruningResults():
                         results.append(scoreP)
 
                         for idx in range(len(metricNames)):
-                            file.write("%s (%s): %f, %f, %f%%\n" % (metricNames[idx], "loss" if importance == Modes.LOSS.value else "importance", score[idx], scoreP[idx], percentChange(score[idx], scoreP[idx])))
+                            file.write("%s (%s): %f, %f, %f%%\n" % (metricNames[idx], "loss" if importance == Selection_Modes.LOSS.value else "importance", score[idx], scoreP[idx], percentChange(score[idx], scoreP[idx])))
 
                 x = np.arange(0, numFilters)
 
@@ -536,7 +554,7 @@ def getPruningResults():
             if lossModeDisabled:
                 ax.set_title('Pruning on layer ' + layerName, color='C0')
             else:
-                ax.set_title('Pruning on layer ' + layerName + ' w.r.t. ' + ('loss' if importance == Modes.LOSS.value else 'importance'), color='C0')
+                ax.set_title('Pruning on layer ' + layerName + ' w.r.t. ' + ('loss' if importance == Selection_Modes.LOSS.value else 'importance'), color='C0')
 
             for idx in range(len(metricNames)):
                 ax.plot(x, [x[idx] for x in results], label=metricNames[idx], linewidth=1.0, marker='o', color='C' + str(idx))
@@ -567,7 +585,7 @@ def getPruningResults():
                     metricNames, score, scoreP = rectifyMetrics(visualizationToolbox, DATASET_TYPE, score, scoreP)
 
                     for idx in range(len(metricNames)):
-                        faithfulnessResultsFile.write("%s (%s) - %s: %f, %f, %f%%\n" % (metricNames[idx], "loss" if importance == Modes.LOSS.value else "importance", filterType, score[idx], scoreP[idx], percentChange(score[idx], scoreP[idx])))
+                        faithfulnessResultsFile.write("%s (%s) - %s: %f, %f, %f%%\n" % (metricNames[idx], "loss" if importance == Selection_Modes.LOSS.value else "importance", filterType, score[idx], scoreP[idx], percentChange(score[idx], scoreP[idx])))
 
     if faithfulnessResultsFile is not None:
         faithfulnessResultsFile.close()
@@ -618,4 +636,4 @@ if __name__ == '__main__':
 
     # Start the service
     print("Starting the service")
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=5000, threaded=False)

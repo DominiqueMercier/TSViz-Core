@@ -4,19 +4,19 @@ import os
 
 # Packages for DL
 import tensorflow as tf
-import keras.backend as K
-from keras.models import load_model, save_model
-from keras.backend.tensorflow_backend import set_session
+#import keras.backend as K
+from tensorflow.keras import backend as K
+from tensorflow.keras.backend import set_session
 import pandas as pd
 import numpy as np
 import scipy.stats
 import math
 from tqdm import tqdm
 
-from keras import regularizers, optimizers
-from keras.models import Model, Sequential
-from keras.layers import Input, Conv1D, BatchNormalization, LeakyReLU, MaxPooling1D, Flatten, Dense, Lambda, Conv2DTranspose, Activation
-from keras.callbacks import TensorBoard, ModelCheckpoint, EarlyStopping, ReduceLROnPlateau
+from tensorflow.keras import regularizers, optimizers
+from tensorflow.keras.models import Model, Sequential, load_model, save_model
+from tensorflow.keras.layers import Input, Conv1D, BatchNormalization, LeakyReLU, MaxPooling1D, Flatten, Dense, Lambda, Conv2DTranspose, Activation
+from tensorflow.keras.callbacks import TensorBoard, ModelCheckpoint, EarlyStopping, ReduceLROnPlateau
 
 from sklearn.preprocessing import StandardScaler
 import seaborn as sns
@@ -66,7 +66,9 @@ class VisualizationToolbox:
         self.inputIterator = 0
         self.currentPercentileValue = 0.0
 
-        self.setType = Dataset.TEST.value
+        self.setType = Dataset_Splits.TEST.value
+
+        self.initializeTensorflow()
 
         # Load and setup the model
         self.loadDatasets()
@@ -91,15 +93,16 @@ class VisualizationToolbox:
         config.gpu_options.allow_growth = True
         self.sess = tf.Session(config=config)
         set_session(self.sess)
-
+        
         # Initialize variables
         self.sess.run(tf.global_variables_initializer())
-
-
+        
     def loadDatasets(self):
-        if DATASET == Dataset.INTERNET_TRAFFIC:
+        if DATASET == Datasets.INTERNET_TRAFFIC:
             dataPath = "./datamark-internettrafficdata.csv"
-            self.modelPath = "./modCNN_Outsidesteps1e5000lr0.001lb50batch5datamark-internettrafficdata.ctrs14000tes4000deriv1.h5"
+            self.dataName = "INTERNET_TRAFFIC"
+            #self.modelPath = "./modCNN_Outsidesteps1e5000lr0.001lb50batch5datamark-internettrafficdata.ctrs14000tes4000deriv1.h5"
+            self.modelPath = "./internet_traffic.h5"
             self.autoencoderPath = "./autoencoder-internet-traffic.h5"
             self.autoencoderWithModelPath = "./autoencoder_with_model-internet-traffic.h5"
 
@@ -135,8 +138,13 @@ class VisualizationToolbox:
             self.trainX, self.trainY = create_dataset(train, self.look_back, steps)
             self.testX, self.testY = create_dataset(test, self.look_back, steps)
 
-        if DATASET == Dataset.ANOMALY_DETECTION:
+            if steps == 1:
+                self.trainY = np.reshape(self.trainY, (-1,1))
+                self.testY = np.reshape(self.testY, (-1,1))
+
+        if DATASET == Datasets.ANOMALY_DETECTION:
             dataPath = "./anomaly_dataset.pickle"
+            self.dataName = "ANOMALY_DETECTION"
             self.modelPath = "./cnn_anomaly_dataset.h5"
             self.autoencoderPath = "./autoencoder-anomaly.h5"
             self.autoencoderWithModelPath = "./autoencoder_with_model-anomaly.h5"
@@ -235,27 +243,50 @@ class VisualizationToolbox:
                 with open(dataPath, "wb") as pickleFile:
                     pickle.dump([self.trainX, self.trainY, self.testX, self.testY], pickleFile, protocol=pickle.HIGHEST_PROTOCOL)
                 print("Data saved successfully!")
-
             else:
                 print("Loading data from file: %s" % (dataPath))
                 # Load data from pickle file
                 with open(dataPath, "rb") as pickleFile:
-                    self.trainX, self.trainY, self.testX, self.testY = pickle.load(pickleFile)
-                print("Data loaded successfully!")
+                    data = pickle.load(pickleFile)
+                    self.trainX, self.trainY, self.testX, self.testY = data
+
+        if DATASET == Datasets.CHARACTER_TRAJECTORIES:
+            dataPath = "./character_trajectories.pickle"
+            self.dataName = "CHARACTER_TRAJECTORIES"
+            self.modelPath = "./cnn_character_trajectories_dataset.h5"
+            self.autoencoderPath = "./autoencoder-character.h5"
+            self.autoencoderWithModelPath = "./autoencoder_with_model-character.h5"
+
+            # Name for the standard model
+            self.standardModelPath = self.modelPath
+            self.standardModelName = "cnn_character_trajectories_dataset"
+
+            
+            print("Loading data from file: %s" % (dataPath))
+            # Load data from pickle file
+            with open(dataPath, "rb") as pickleFile:
+                data = pickle.load(pickleFile)
+                self.trainX, self.trainY, self.valX, self.valY, self.testX, self.testY = data
+                self.valY = np.argmax(self.valY, axis=-1)
+                self.trainY = np.argmax(self.trainY, axis=-1)
+                self.testY = np.argmax(self.testY, axis=-1)
+
+            print("Data loaded successfully!")
 
         # Saves the currently loaded model name
         self.currentlyLoadedModel = self.standardModelName
 
-        self.valX = self.trainX[numTrainExamples - numValExamples:, :, :]
-        self.valY = self.trainY[numTrainExamples - numValExamples:]
-        self.trainX = self.trainX[:numTrainExamples - numValExamples, :, :]
-        self.trainY = self.trainY[:numTrainExamples - numValExamples]
+        if not DATASET == Datasets.CHARACTER_TRAJECTORIES:
+            self.valX = self.trainX[numTrainExamples - numValExamples:, :, :]
+            self.valY = self.trainY[numTrainExamples - numValExamples:]
+            self.trainX = self.trainX[:numTrainExamples - numValExamples, :, :]
+            self.trainY = self.trainY[:numTrainExamples - numValExamples]
 
         print("Train set | X shape: %s | Y shape: %s" % (str(self.trainX.shape), str(self.trainY.shape)))
         print("Validation set | X shape: %s | Y shape: %s" % (str(self.valX.shape), str(self.valY.shape)))
         print("Test set | X shape: %s | Y shape: %s" % (str(self.testX.shape), str(self.testY.shape)))
 
-        if DATASET != Dataset.INTERNET_TRAFFIC:
+        if DATASET == Datasets.ANOMALY_DETECTION:
             # Print number of anomalous sequences in the dataset
             trainAnomalies = np.sum(self.trainY == 1)
             valAnomalies = np.sum(self.valY == 1)
@@ -263,9 +294,10 @@ class VisualizationToolbox:
             print("Train anomalies: %d | Validation anomalies: %d | Test anomalies: %d" % (trainAnomalies, valAnomalies, testAnomalies))
 
 
-    def loadCustomSingleChannelDatasets(self, dataPath):
+    def loadCustomSingleChannelDatasets(self, dataPath, dataName):
         # Load the data
         dataframe = pd.read_csv(dataPath, usecols=[0], sep=',', engine='python')
+        self.dataName = dataName
         frameSize = len(dataframe.values)
         train_size = int(frameSize*0.7)
         test_size = frameSize - train_size
@@ -303,7 +335,7 @@ class VisualizationToolbox:
 
     def loadModel(self):
         if not os.path.exists(self.modelPath):
-            assert DATASET != Dataset.INTERNET_TRAFFIC, "Error: Model generation not supported for internet traffic dataset!"
+            assert DATASET != Datasets.INTERNET_TRAFFIC, "Error: Model generation not supported for internet traffic dataset!"
 
             # Train the model
             numTimeSteps = self.trainX.shape[1]
@@ -333,23 +365,21 @@ class VisualizationToolbox:
             else:
                 net = Conv1D(16, kernel_size=3, kernel_regularizer=regularizers.l2(regLambda))(visible)
                 net = LeakyReLU(leakRate)(net)
-                if DATASET != Dataset.MAMO and DATASET != Dataset.NASA_SPACE_SHUTTLE:
-                    net = MaxPooling1D(pool_size=2)(net)
+                net = MaxPooling1D(pool_size=2)(net)
                 net = Conv1D(32, kernel_size=3, kernel_regularizer=regularizers.l2(regLambda))(net)
                 net = LeakyReLU(leakRate)(net)
-                if DATASET != Dataset.MAMO and DATASET != Dataset.NASA_SPACE_SHUTTLE:
-                    net = MaxPooling1D(pool_size=2)(net)
-                    net = Conv1D(64, kernel_size=3, kernel_regularizer=regularizers.l2(regLambda))(net)
-                    net = LeakyReLU(leakRate)(net)
+                net = MaxPooling1D(pool_size=2)(net)
+                net = Conv1D(64, kernel_size=3, kernel_regularizer=regularizers.l2(regLambda))(net)
+                net = LeakyReLU(leakRate)(net)
 
             net = Flatten()(net)
 
             net = Dense(len(CLASS_NAMES), kernel_regularizer=regularizers.l2(regLambda), activity_regularizer=regularizers.l1(actReg))(net)
-            net = Activation('sigmoid' if len(CLASS_NAMES) == 1 else 'softmax')(net)
+            net = Activation('sigmoid' if len(CLASS_NAMES) == 2 else 'softmax')(net)
             model = Model(inputs=visible, outputs=net)
 
             optimizer = optimizers.Adam(lr=0.01, beta_1=0.9, beta_2=0.999, epsilon=None, decay=0.0, amsgrad=True)
-            model.compile(loss='binary_crossentropy' if len(CLASS_NAMES) == 1 else 'sparse_categorical_crossentropy', metrics=['accuracy'], optimizer=optimizer)
+            model.compile(loss='binary_crossentropy' if len(CLASS_NAMES) == 2 else 'sparse_categorical_crossentropy', metrics=['accuracy'], optimizer=optimizer)
 
             checkpoint = ModelCheckpoint(self.modelPath, monitor='val_loss', verbose=1, save_best_only=True, mode='auto')
             earlyStop = EarlyStopping(monitor='val_loss', min_delta=0, patience=15, verbose=1, mode='auto')
@@ -358,13 +388,18 @@ class VisualizationToolbox:
             model.fit(self.trainX, self.trainY, epochs=100, validation_data=(self.valX, self.valY), shuffle=True, callbacks=[checkpoint, earlyStop, lr_reducer])
 
         # Load the model
-        self.model = load_model(self.modelPath)
-        self.model.name = "Model"
-        self.currentlyLoadedModel = self.standardModelPath
+        #self.model = load_model(self.modelPath)
+        self.model = load_model(self.modelPath, compile=False)
+        optimizer = optimizers.Adam(lr=0.002, beta_1=0.9, beta_2=0.999, epsilon=None, decay=0.0, amsgrad=True)
+        self.model.compile(loss='binary_crossentropy' if len(CLASS_NAMES) == 2 else 'sparse_categorical_crossentropy', metrics=['accuracy'], optimizer=optimizer)
+
+        #self.model.name = "Model"
+        self.model._name = "Model"
+        #self.currentlyLoadedModel = self.standardModelPath
 
         print("Model summary:")
         self.model.summary()
-
+        
         out = self.model.evaluate(self.trainX, self.trainY, verbose=False)
         print("Train | Metric value: %s | Metric Name: %s" % (str(out), self.model.metrics_names))
         out = self.model.evaluate(self.valX, self.valY, verbose=False)
@@ -378,13 +413,17 @@ class VisualizationToolbox:
         outputLayers = [layer for layer in outputLayers if not ("flatten" in layer.name or "input" in layer.name)]  # Discard the flattening and input layers
         requiredGradients = [currentLayer.output for currentLayer in outputLayers]
         self.outputLayer = requiredGradients[-1]
+        if 'softmax' in self.model.layers[-1].activation.__name__:
+            self.pre_softmaxoutputLayer = requiredGradients[-2]
+        else:
+            self.pre_softmaxoutputLayer = self.outputLayer
 
-        if DATASET_TYPE == Dataset.CLASSIFICATION:
-            if len(CLASS_NAMES) == 1:
+        if DATASET_TYPE == Dataset_Types.CLASSIFICATION:
+            if len(CLASS_NAMES) == 2:
                 self.labelsPlaceholder = tf.placeholder(tf.float32, shape=[None, 1])
             else:
                 self.labelsPlaceholder = tf.placeholder(tf.int64, shape=[None, 1])
-            if len(CLASS_NAMES) == 1:  # Influence will die off when sigmoid unit is saturated (multiplication with sigmoid unit in backprop)
+            if len(CLASS_NAMES) == 2:  # Influence will die off when sigmoid unit is saturated (multiplication with sigmoid unit in backprop)
                 self.loss = tf.reduce_mean(tf.keras.backend.binary_crossentropy(target=self.labelsPlaceholder, output=requiredGradients[-1]))
             else:
                 self.loss = tf.reduce_mean(tf.keras.backend.sparse_categorical_crossentropy(target=tf.squeeze(self.labelsPlaceholder, axis=1), output=requiredGradients[-1]))
@@ -418,16 +457,16 @@ class VisualizationToolbox:
                 self.layerGradientsWrtInput.append(tf.gradients(tensorSlice, [self.inputPlaceholder]))
                 self.layerNames.append(outputLayers[layerIdx].name + "-" + str(filterIdx))
 
-        self.outputGradientsWrtLayer = [tf.gradients(self.outputLayer, [tensorToBeDifferentiated]) for tensorToBeDifferentiated in requiredGradients[:-1]]
+        self.outputGradientsWrtLayer = [tf.gradients(self.pre_softmaxoutputLayer, [tensorToBeDifferentiated]) for tensorToBeDifferentiated in requiredGradients[:-1]]
         self.lossGradientsWrtLayer = [tf.gradients(self.loss, [tensorToBeDifferentiated]) for tensorToBeDifferentiated in requiredGradients[:-1]]
 
         # For inverse optimization and adversarial examples
         self.lossGrad = tf.gradients(self.loss, [self.inputPlaceholder])
         self.signGrad = tf.sign(self.lossGrad) # Use only the sign of the gradient
-        self.outputGrad = tf.gradients(self.outputLayer, [self.inputPlaceholder])
+        self.outputGrad = tf.gradients(self.pre_softmaxoutputLayer, [self.inputPlaceholder])
 
         self.scaleGradientWrtLossValues = True
-        self.adjustedFilterIndices = getAdjustedFilterIndices(self.currentlyLoadedModel)
+        self.adjustedFilterIndices = getAdjustedFilterIndices(self.currentlyLoadedModel, self.dataName)
 
 
     def prevInputButton(self):
@@ -439,8 +478,8 @@ class VisualizationToolbox:
 
 
     def nextInputButton(self):
-        if (self.setType == Dataset.TEST.value and (self.inputIterator < self.testX.shape[0] - 1)) or \
-                (self.setType == Dataset.TRAIN.value and (self.inputIterator < self.trainX.shape[0] - 1)):
+        if (self.setType == Dataset_Splits.TEST.value and (self.inputIterator < self.testX.shape[0] - 1)) or \
+                (self.setType == Dataset_Splits.TRAIN.value and (self.inputIterator < self.trainX.shape[0] - 1)):
             self.inputIterator += 1
             return True
         else:
@@ -453,8 +492,8 @@ class VisualizationToolbox:
 
 
     def setIterator(self, iterator):
-        if (self.setType == Dataset.TEST.value and (self.inputIterator >= self.testX.shape[0] - 1)) or \
-                (self.setType == Dataset.TRAIN.value and (self.inputIterator >= self.trainX.shape[0] - 1)):
+        if (self.setType == Dataset_Splits.TEST.value and (iterator >= self.testX.shape[0] - 1)) or \
+                (self.setType == Dataset_Splits.TRAIN.value and (iterator >= self.trainX.shape[0] - 1)):
             return False
 
         self.inputIterator = iterator
@@ -477,13 +516,13 @@ class VisualizationToolbox:
 
 
     def classifySequence(self, seq):
-        with K.get_session().graph.as_default():
+        with self.sess.graph.as_default():
             prediction = self.model.predict(np.expand_dims(seq, axis=0))
         return prediction[0]
 
 
     def getExample(self):
-        if self.setType == Dataset.TEST.value:
+        if self.setType == Dataset_Splits.TEST.value:
             X = self.testX[self.inputIterator, :, :]
             y = self.testY[self.inputIterator]
         else:
@@ -494,20 +533,17 @@ class VisualizationToolbox:
 
     def switchToTest(self):
         self.inputIterator = 0
-        self.setType = Dataset.TEST.value
+        self.setType = Dataset_Splits.TEST.value
         return True
 
 
     def switchToTrain(self):
         self.inputIterator = 0
-        self.setType = Dataset.TRAIN.value
+        self.setType = Dataset_Splits.TRAIN.value
         return True
 
 
     def getPrediction(self):
-        # Get the session from Keras backend
-        self.sess = K.get_session()
-
         X, y = self.getExample()
 
         # Get the prediction and the saliency for the last layer
@@ -541,12 +577,9 @@ class VisualizationToolbox:
         return arch
 
 
-    def loadData(self, fastMode=Modes.FULL.value, visualizationFilters=False, verbose=False):
-        # Get the session from Keras backend
-        self.sess = K.get_session()
-
+    def loadData(self, fastMode=Computation_Modes.FULL.value, customSeq=None, customLabel= None, visualizationFilters=False, verbose=False):
         serviceOutput = []
-        if self.setType == Dataset.TEST.value:
+        if self.setType == Dataset_Splits.TEST.value:
             currentInput = self.testX[self.inputIterator, :, :]
             currentLabel = self.testY[self.inputIterator]
         else:
@@ -559,10 +592,14 @@ class VisualizationToolbox:
         serviceOutput.append(CLASS_NAMES)
         serviceOutput.append(INPUT_FEATURE_NAMES)
 
+        if not customLabel is None:
+            currentInput = customSeq
+            currentLabel = customLabel
+
         # layerNames[0] contains "input" if a pruned model has been loaded
         serviceOutput.append(self.getModelLayerNames())
 
-        if fastMode == Modes.FULL.value:
+        if fastMode == Computation_Modes.FULL.value:
             # Add inverse optimization and adversarial examples output here
             startingSeries, startingSeriesForecast, startSerSaliencyMap, invOptimizedSeries, invOptimizedForecast, invOptSaliencyMap, advExampleOrig, forecastValueAdvOrig, advExSaliencyMap = self.performInverseOptimizationAndAdvAttack()
             serviceOutput.append([startingSeries.tolist(), startingSeriesForecast.tolist(), startSerSaliencyMap.tolist(),
@@ -710,11 +747,11 @@ class VisualizationToolbox:
         if "input" in self.layerNames[0]:
             del serviceOutput[self.dataStartingIdx]
 
-        if fastMode != Modes.MINIMAL.value:
+        if fastMode != Computation_Modes.MINIMAL.value:
             # Iterate over all the filters to compute the rank of filter clusters
             computeFilterClusters(self, serviceOutput, visualizeFilters=visualizationFilters, verbose=verbose)
 
-        if fastMode == Modes.FULL.value:
+        if fastMode == Computation_Modes.FULL.value:
             print("Loss:", loss, "| Y:", np.squeeze(currentLabel), "| Output:", np.squeeze(output))
 
         return serviceOutput
@@ -746,12 +783,12 @@ class VisualizationToolbox:
         convIds = [i + self.dataStartingIdx for i in range(len(serviceOutput[self.layerNamesIdx])) if "conv" in serviceOutput[self.layerNamesIdx][i]]
         importanceValues = []
 
-        if importanceSelection == Modes.IMPORTANCE.value:
+        if importanceSelection == Selection_Modes.IMPORTANCE.value:
             valueIdx = self.filterImportanceIdx
         else:
             valueIdx = self.filterLossImpactIdx
 
-        if dataMode == Modes.SELECTED_EXAMPLES.value and importanceMode < Modes.CLUSTER_REPRESENTATIVES.value:
+        if dataMode == Data_Modes.SELECTED_EXAMPLES.value and importanceMode < Importance_Modes.CLUSTER_REPRESENTATIVES.value:
             for layerIdx in convIds:
                 layerList = []
                 for filterO in serviceOutput[layerIdx]:
@@ -759,10 +796,10 @@ class VisualizationToolbox:
                 importanceValues.append(layerList)
             result = computeIndices(importanceValues, importanceMode, numberOfFilter, layerSelection, len(convIds))
 
-        if dataMode == Modes.ALL_EXAMPLES.value and importanceMode < Modes.CLUSTER_REPRESENTATIVES.value:
+        if dataMode == Data_Modes.ALL_EXAMPLES.value and importanceMode < Importance_Modes.CLUSTER_REPRESENTATIVES.value:
             backupInputIterator = self.inputIterator
             self.inputIterator = 0
-            serviceOutput = self.loadData(fastMode=Modes.MINIMAL.value)
+            serviceOutput = self.loadData(fastMode=Computation_Modes.MINIMAL.value)
             # Initial design
             for layerIdx in convIds:
                 layerList = []
@@ -771,7 +808,7 @@ class VisualizationToolbox:
                 importanceValues.append(layerList)
             self.inputIterator += 1
             while self.inputIterator < self.trainX.shape[0] - 1:
-                serviceOutput = self.loadData(fastMode=Modes.MINIMAL.value)
+                serviceOutput = self.loadData(fastMode=Computation_Modes.MINIMAL.value)
                 for layerIdx, serviceIdx in enumerate(convIds):
                     for filterIdx, filterO in enumerate(serviceOutput[serviceIdx]):
                         importanceValues[layerIdx][filterIdx] = filterO[valueIdx]
@@ -780,15 +817,15 @@ class VisualizationToolbox:
             serviceOutput = self.loadData()
             result = computeIndices(importanceValues, importanceMode, numberOfFilter, layerSelection, len(convIds))
 
-        if dataMode == Modes.SELECTED_EXAMPLES.value and importanceMode == Modes.CLUSTER_REPRESENTATIVES.value:
+        if dataMode == Data_Modes.SELECTED_EXAMPLES.value and importanceMode == Importance_Modes.CLUSTER_REPRESENTATIVES.value:
             result = computeRepresentatives(self, serviceOutput, layerSelection, convIds)
 
-        if dataMode == Modes.ALL_EXAMPLES.value and importanceMode == Modes.CLUSTER_REPRESENTATIVES.value:
+        if dataMode == Data_Modes.ALL_EXAMPLES.value and importanceMode == Importance_Modes.CLUSTER_REPRESENTATIVES.value:
             result = []
             backupInputIterator = self.inputIterator
             self.inputIterator = 0
             while self.inputIterator < self.trainX.shape[0] - 1:
-                serviceOutput = self.loadData(fastMode=Modes.PARTIAL.value)
+                serviceOutput = self.loadData(fastMode=Computation_Modes.PARTIAL.value)
                 result.append(computeRepresentatives(serviceOutput, layerSelection, convIds))
                 self.inputIterator += 1
             result = matchRepresentatives(result)
@@ -806,29 +843,29 @@ class VisualizationToolbox:
 
         # If number of examples is zero or negative, compute the statistics over the entire dataset
         if examples < 1:
-            examples = self.testX.shape[0] if dataset == Dataset.TEST.value else self.trainX.shape[0]
+            examples = self.testX.shape[0] if dataset == Dataset_Splits.TEST.value else self.trainX.shape[0]
 
         if reverse == 1:
             percentile = 100 - percentile
 
-        if importance == Modes.IMPORTANCE.value:
-            importanceIdx = visualizationToolbox.filterImportanceIdx
+        if importance == Selection_Modes.IMPORTANCE.value:
+            importanceIdx = self.filterImportanceIdx
             measure = "importance"
         else:
-            importanceIdx = visualizationToolbox.filterLossImpactIdx
+            importanceIdx = self.filterLossImpactIdx
             measure = "loss"
 
-        if mode == Modes.COMPUTE_RANDOM.value:
-            filterObject = randomUseless(visualizationToolbox, percentile)
+        if mode == Filter_Modes.COMPUTE_RANDOM.value:
+            filterObject = randomUseless(self, percentile)
 
-        if mode == Modes.COMPUTE_PERCENTILE.value:
+        if mode == Filter_Modes.COMPUTE_PERCENTILE.value:
             filepath = os.path.join(filepath, "MinMaxMean_" + measure + ".npy")
             if not os.path.isfile(filepath):
                 computeAndSaveImportanceValues(self, filepath, examples, self.filterImportanceIdx, dataset)
             removementSet = computeRemovementSets(self, filepath, percentile)
             filterObject = removementSet[submode][0]
 
-        if mode == Modes.COMPUTE_REPRESENTATIVE.value:
+        if mode == Filter_Modes.COMPUTE_REPRESENTATIVE.value:
             filepath = os.path.join(filepath, "MeanRepresentatives_" + measure + ".npy")
             if not os.path.isfile(filepath):
                 computeRepresentativeValues(self, filepath, examples, self.filterImportanceIdx, dataset)
@@ -836,23 +873,23 @@ class VisualizationToolbox:
             filterObject = keepOnlyRepresentants(self, mostRepresentatives, dataset)
 
         if reverse == 1:
-            filterObject = reverseFilterList(visualizationToolbox, filterObject)
+            filterObject = reverseFilterList(self, filterObject)
 
         return filterObject
 
 
     def performNetworkPruning(self, epochs, indices, name, mode):
-        dirpath = "."
+        dirpath = "./"
         dirpathAdjustedFilters = os.path.join(dirpath, 'adjustedFilters')
 
         # File that stores the indexes of filters of the currently loaded model that have been adjusted (weights and biases set to 0)
-        filepathOldModel = os.path.join(dirpathAdjustedFilters, self.currentlyLoadedModel)
+        filepathOldModel = os.path.join(dirpathAdjustedFilters, self.currentlyLoadedModel.split('/')[-1][:-3])
 
         # File that will store the indexes of filters of the new model that have been adjusted (weights and biases set to 0)
-        filepathNewModel = os.path.join(dirpathAdjustedFilters, name)
+        filepathNewModel = os.path.join(dirpathAdjustedFilters, name  + "_" + self.dataName)
 
         dirpathModelNames = os.path.join(dirpath, 'prunedModels')
-        filepathModelNames = os.path.join(dirpathModelNames, 'prunedModelNames')
+        filepathModelNames = os.path.join(dirpathModelNames, 'prunedModelNames_' + self.dataName)
 
         # Check if a model with the same name exists already
         try:
@@ -882,12 +919,12 @@ class VisualizationToolbox:
             print("Error: Unable to open the adjusted filter files at " + filepathOldModel)
             adjustedFilterList = []
 
-        if mode == Modes.PRUNE.value:
+        if mode == Prune_Modes.PRUNE.value:
             # Remove filters specified in the string indices
-            prunedModel = pruneNetwork(K.get_session(), self.model, indices)
+            prunedModel = pruneNetwork(self.sess, self.model, indices)
 
             # Train the new model for a few epochs
-            score, scoreP = finetunePrunedModel(K.get_session(), prunedModel, self, epochs)
+            score, scoreP = finetunePrunedModel(self.sess, prunedModel, self, epochs)
 
             # Update the adjusted filters file (remove adjusted indexes if filter at index has been pruned, decrement every filter index greater than a pruned filter (to keep the indexes correct after pruning))
             for index1, prunedFilterLayerNew in enumerate(indices):  # Indices holds the indexes of the filters to be pruned
@@ -906,12 +943,12 @@ class VisualizationToolbox:
             # Convert back to string format to save them again
             indiceString = listToIndiceString(adjustedFilterList)
 
-        elif mode == Modes.ADJUST.value:
+        elif mode == Prune_Modes.ADJUST.value:
             # Set filter weights and biases to 0. For filters specified in indices
-            prunedModel = adjustWeights(K.get_session(), self.model, indices)
+            prunedModel = adjustWeights(self.sess, self.model, indices)
 
             # Evaluate the new model
-            score, scoreP = finetunePrunedModel(K.get_session(), prunedModel, self, -1)
+            score, scoreP = finetunePrunedModel(self.sess, prunedModel, self, -1)
 
             # Update the adjusted filters file (add new adjusted indexes to new file for new model)
             combined = joinInnerLists(indices, adjustedFilterList) # combine the adjusted filter indexes from the old model and the newly adjusted filter indexes
@@ -932,14 +969,14 @@ class VisualizationToolbox:
             with open(filepathNewModel, "w") as file:
                 file.write(indiceString)
 
-            save_model(model=prunedModel, filepath=os.path.join("prunedModels", name + ".h5"), overwrite=True, include_optimizer=True)
+            save_model(model=prunedModel, filepath=os.path.join("prunedModels", name + "_" + self.dataName + ".h5"), overwrite=True, include_optimizer=True)
 
         return [score, scoreP]
 
 
     def performTesting(self):
         print("Evaluation results:")
-        with K.get_session().graph.as_default():
+        with self.sess.graph.as_default():
             score = self.model.evaluate(x=self.testX, y=np.reshape(self.testY, self.testY.shape[0]), verbose=1)
 
         for idx, metricName in enumerate(self.model.metrics_names):
@@ -951,7 +988,7 @@ class VisualizationToolbox:
     def loadImportanceValues(self, modelName):
         # Reads an importance statistics file that stores min, max and mean importance values of every filter of a model
         output = []
-        path = os.path.join(".", os.path.join("ImportanceStatistics", modelName))
+        path = os.path.join(".", os.path.join("ImportanceStatistics", modelName + "_" + self.dataName))
         try:
             txt_file = open(path, "r")
             last_name = ""
@@ -973,7 +1010,7 @@ class VisualizationToolbox:
     def computeMinMaxMeanImportanceValues(self, modelName, n_examples):
         # computes min, max, mean importance values for every filter of the currently loaded model
         dirpath = os.path.join(".", "ImportanceStatistics")
-        filepath = os.path.join(dirpath, modelName)
+        filepath = os.path.join(dirpath, modelName + "_" + self.dataName)
         ensureDirExists(dirpath)
         if not os.path.isfile(filepath):
             temporary = self.importanceValues
